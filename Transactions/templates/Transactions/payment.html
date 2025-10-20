@@ -1,0 +1,241 @@
+<!-- transactions/templates/transactions/payment.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>M-Pesa Payment</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input, textarea { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+        button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin: 5px; }
+        button:disabled { background: #6c757d; }
+        .btn-success { background: #28a745; }
+        .btn-warning { background: #ffc107; color: #000; }
+        .alert { padding: 10px; border-radius: 4px; margin-bottom: 15px; }
+        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+        .warning { background: #fff3cd; color: #856404; border: 1px solid #ffeaa7; }
+        .transaction-info { margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 4px; }
+        .manual-testing { margin-top: 20px; padding: 15px; background: #fff3cd; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <h2>M-Pesa Payment</h2>
+
+    <div class="alert info">
+        <strong>Development Mode:</strong> For testing M-Pesa integration
+    </div>
+
+    <div id="message"></div>
+
+    <form id="paymentForm">
+        {% csrf_token %}
+        <div class="form-group">
+            <label for="phone_number">Phone Number:</label>
+            <input type="text" id="phone_number" name="phone_number" placeholder="e.g., 0712345678" required>
+            <small>Format: 07XXX or 2547XXX (Test numbers from Daraja portal)</small>
+        </div>
+
+        <div class="form-group">
+            <label for="amount">Amount (KES):</label>
+            <input type="number" id="amount" name="amount" min="1" max="150000" value="1" required>
+            <small>Use small amounts for testing (KES 1-10)</small>
+        </div>
+
+        <div class="form-group">
+            <label for="reference">Reference:</label>
+            <input type="text" id="reference" name="reference" placeholder="Payment reference" value="TEST001" required>
+        </div>
+
+        <div class="form-group">
+            <label for="description">Description:</label>
+            <textarea id="description" name="description" placeholder="Payment description">Test Payment</textarea>
+        </div>
+
+        <button type="submit" id="submitBtn">Pay with M-Pesa</button>
+    </form>
+
+    <div id="manualTesting" class="manual-testing" style="display: none;">
+        <h3>Manual Testing (Development)</h3>
+        <p>STK push failed due to callback URL issues. You can simulate a successful payment for testing:</p>
+        <div id="manualButtons">
+            <button onclick="simulateSuccess()" class="btn-success">Simulate Successful Payment</button>
+            <button onclick="simulateFailure()" class="btn-warning">Simulate Failed Payment</button>
+        </div>
+    </div>
+
+    <div id="transactionInfo" class="transaction-info" style="display: none;">
+        <h3>Transaction Status</h3>
+        <div id="statusMessage"></div>
+        <button onclick="checkStatus()" id="statusBtn">Check Status</button>
+    </div>
+
+    <script>
+        // Get CSRF token function
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+
+        const csrftoken = getCookie('csrftoken');
+
+        let currentTransactionId = null;
+
+        document.getElementById('paymentForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            const submitBtn = document.getElementById('submitBtn');
+            const messageDiv = document.getElementById('message');
+            const transactionInfo = document.getElementById('transactionInfo');
+            const manualTesting = document.getElementById('manualTesting');
+
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Processing...';
+            messageDiv.innerHTML = '';
+            transactionInfo.style.display = 'none';
+            manualTesting.style.display = 'none';
+
+            const formData = new FormData(this);
+
+            fetch('/mpesa/stk-push/', {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-CSRFToken': csrftoken,
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.success) {
+                    messageDiv.innerHTML = `<div class="alert success">${data.message}</div>`;
+
+                    if (data.transaction_id) {
+                        currentTransactionId = data.transaction_id;
+                        transactionInfo.style.display = 'block';
+                        checkStatus();
+                    }
+                } else {
+                    messageDiv.innerHTML = `<div class="alert error">${data.error}</div>`;
+
+                    if (data.manual_option && data.transaction_id) {
+                        currentTransactionId = data.transaction_id;
+                        manualTesting.style.display = 'block';
+                        transactionInfo.style.display = 'block';
+                        checkStatus();
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                messageDiv.innerHTML = `<div class="alert error">Network error: ${error.message}</div>`;
+            })
+            .finally(() => {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Pay with M-Pesa';
+            });
+        });
+
+        function checkStatus() {
+            if (!currentTransactionId) return;
+
+            const statusBtn = document.getElementById('statusBtn');
+            const statusMessage = document.getElementById('statusMessage');
+
+            statusBtn.disabled = true;
+            statusBtn.textContent = 'Checking...';
+
+            fetch(`/mpesa/transaction/${currentTransactionId}/`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.error) {
+                        statusMessage.innerHTML = `<div class="alert error">${data.error}</div>`;
+                    } else {
+                        let statusClass = 'info';
+                        if (data.status === 'successful') statusClass = 'success';
+                        if (data.status === 'failed') statusClass = 'error';
+                        if (data.status === 'pending') statusClass = 'warning';
+
+                        statusMessage.innerHTML = `
+                            <div class="alert ${statusClass}">
+                                <strong>Status:</strong> ${data.status}<br>
+                                ${data.mpesa_receipt_number ? `<strong>Receipt:</strong> ${data.mpesa_receipt_number}<br>` : ''}
+                                <strong>Phone:</strong> ${data.phone_number}<br>
+                                <strong>Amount:</strong> KES ${data.amount}<br>
+                                <strong>Reference:</strong> ${data.reference}<br>
+                                <strong>Created:</strong> ${new Date(data.created_at).toLocaleString()}
+                            </div>
+                        `;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    statusMessage.innerHTML = `<div class="alert error">Error checking status: ${error.message}</div>`;
+                })
+                .finally(() => {
+                    statusBtn.disabled = false;
+                    statusBtn.textContent = 'Check Status';
+                });
+        }
+
+        function simulateSuccess() {
+            if (!currentTransactionId) return;
+
+            fetch(`/mpesa/simulate-success/${currentTransactionId}/`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': csrftoken,
+                    'Content-Type': 'application/json',
+                }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('message').innerHTML =
+                        '<div class="alert success">Payment simulated successfully!</div>';
+                    checkStatus();
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById('message').innerHTML =
+                    `<div class="alert error">Simulation failed: ${error.message}</div>`;
+            });
+        }
+
+        function simulateFailure() {
+            if (!currentTransactionId) return;
+
+            // You can implement failure simulation similarly
+            alert('Failure simulation would be implemented here');
+        }
+    </script>
+</body>
+</html>
