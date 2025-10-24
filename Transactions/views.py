@@ -35,7 +35,7 @@ class InitiateSTKPush(View):
         try:
             # Use ngrok URL for callback in development
             if settings.DEBUG:
-                callback_url = 'https://0f43568e0f89.ngrok-free.app/mpesa/callback/'
+                callback_url = 'https://b6ac464529d9.ngrok-free.app/mpesa/callback/'
             else:
                 callback_url = request.build_absolute_uri('/mpesa/callback/')
             print(f"Using callback URL: {callback_url}")
@@ -159,7 +159,7 @@ class InitiateSTKPush(View):
                 'error_message': f'Error parsing response: {str(e)}',
                 'raw_response': str(response)
             }
-            
+
 @csrf_exempt
 def stk_push_callback(request):
     """
